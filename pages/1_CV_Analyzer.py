@@ -13,7 +13,7 @@ from utils.scoring import (score_summary, score_experience, score_hard_skills,
                             aggregate_by_element, keyword_matches)
 
 st.set_page_config(page_title="Professional CV Analysis", layout="wide")
-st.title("CV Content & Structure Audit")
+st.title("Analysing CV")
 
 if not st.session_state.get("cv_text"):
     st.warning("Please upload your CV on the Home page first.")
@@ -57,7 +57,6 @@ if "analysis_done" not in st.session_state:
                                           onet_to_terms=onet_to_terms, ats_keywords_with_scores=ats_keywords_with_scores)
         s_soft       = score_soft_skills(cv_facts, metrics_context)
         s_additional = score_additional(cv_facts)
-        st.write("s_hard result:", s_hard)
         scores = {
             "summary":     s_summary["score"],
             "experience":  s_experience["score"],
@@ -140,13 +139,6 @@ if "cv_scores" in st.session_state:
         })
         st.bar_chart(chart_data, x='Section', y='Score (%)', color="#29b5e8")
 
-    with st.expander("Score Breakdown"):
-        for section, detail_list in details.items():
-            section_score = scores.get(section, "—")
-            score_label = f"{section_score}%" if isinstance(section_score, int) else section_score
-            st.markdown(f"**{section.replace('_', ' ').title()} — {score_label}**")
-            for d in detail_list:
-                st.markdown(f"  {d}")
 
     st.divider()
     st.markdown(st.session_state["analysis_raw"])
