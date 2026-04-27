@@ -2,29 +2,22 @@ import streamlit as st
 from supabase import create_client, Client
 from .config import SUPABASE_URL, SUPABASE_KEY
 
-# Инициализация клиента
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- 1. СПРАВОЧНИКИ (КЭШИРУЮТСЯ) ---
 
 @st.cache_data
 def get_scales_reference():
-    """Загружает метаданные шкал (Min/Max)."""
     res = supabase.table("scales_reference").select("*").execute()
     return {item['Scale ID']: item for item in res.data}
 
 @st.cache_data
 def get_category_descriptions():
-    """Загружает текстовые описания для категорий опыта и образования."""
-    # Используем названия таблиц из твоего последнего примера
     res = supabase.table("exp_categories").select("*").execute()
     return {(item['Element ID'], str(item['Category'])): item['Category Description'] for item in res.data}
 
 
-# --- 2. ПОИСК (ВЕКТОРНЫЙ) ---
 
 def search_occupations(cv_embedding, count=1):
-    """Находит код профессии в O*NET по вектору."""
     return supabase.rpc("match_occupations", {
         "query_embedding": cv_embedding,
         "match_threshold": 0.3,
@@ -32,7 +25,6 @@ def search_occupations(cv_embedding, count=1):
     }).execute().data
 
 def search_ats_keywords(cv_embedding, count=20):
-    """Находит наиболее подходящие ключевые слова ATS."""
     return supabase.rpc("match_ats_keywords", {
         "query_embedding": cv_embedding,
         "match_threshold": 0.3,
@@ -40,14 +32,12 @@ def search_ats_keywords(cv_embedding, count=20):
     }).execute().data
 
 
-# --- 3. ПОЛУЧЕНИЕ И НОРМАЛИЗАЦИЯ ДАННЫХ ---
 
 def get_raw_table_data(table_name: str, onet_code: str):
     res = supabase.table(table_name).select("*").eq('"O*NET-SOC Code"', onet_code).execute()
     print(f"Table: {table_name}, Code: {onet_code}, Rows: {len(res.data)}")
     return res.data if res.data else []
 def get_normalized_metrics(table_name: str, onet_code: str):
-    """Твоя функция нормализации (Skills, Knowledge, Abilities, Styles, Activities)."""
     raw_data = get_raw_table_data(table_name, onet_code)
     scales_ref = get_scales_reference()
     
@@ -71,21 +61,15 @@ def get_normalized_metrics(table_name: str, onet_code: str):
     return normalized_results
 
 def get_job_benchmarks(onet_code: str):
-    """
-    Находит требования к опыту и образованию, соединяя данные вручную (без Foreign Keys).
-    """
     q_code = '"O*NET-SOC Code"'
     
-    # 1. Загружаем данные из основной таблицы опыта
     res_exp = supabase.table("exp").select("*").eq(q_code, onet_code).execute()
     
-    # 2. Загружаем справочник категорий (он обычно маленький, берем весь)
     res_cats = supabase.table("exp_categories").select("*").execute()
     
     if not res_exp.data: 
         return "No experience benchmark data available for this role."
 
-    # Создаем словарь категорий для быстрого поиска: {(Element ID, Category): Description}
     cats_map = {
         (c['Element ID'], str(c['Category'])): c['Category Description'] 
         for c in res_cats.data
@@ -100,7 +84,6 @@ def get_job_benchmarks(onet_code: str):
         if elem_name not in benchmarks: 
             benchmarks[elem_name] = []
         
-        # Берем описание из нашего словаря, если его там нет — пишем "Category {ID}"
         description = cats_map.get((elem_id, cat_id), f"Category {cat_id}")
         
         benchmarks[elem_name].append({
@@ -108,31 +91,25 @@ def get_job_benchmarks(onet_code: str):
             "pct": float(item.get('Data Value', 0))
         })
     
-    # Собираем финальный текстовый вердикт (выбираем самый популярный ответ экспертов)
     output = []
     for name, options in benchmarks.items():
         if options:
             best = max(options, key=lambda x: x['pct'])
-            if best['pct'] > 0: # Только если есть реальные данные
+            if best['pct'] > 0: 
                 output.append(f"- {name}: Target requirement is '{best['desc']}' (Expert Consensus: {best['pct']}% )")
     
     return "\n".join(output) if output else "Benchmarks found but no significant consensus."
 
-# --- 4. СБОР ВСЕХ ОСТАЛЬНЫХ ДАННЫХ ---
 
 def get_everything_else(onet_code: str):
-    """Собирает текстовые данные из остальных таблиц для полного анализа."""
     q_code = '"O*NET-SOC Code"'
     data = {}
     
-    # Текстовые задачи и новые задачи
     data['tasks'] = supabase.table("tasks").select("Task, \"Task Type\"").eq(q_code, onet_code).execute().data
     data['new_tasks'] = supabase.table("new_tasks").select("Task").eq(q_code, onet_code).execute().data
     
-    # Технологические навыки (Software)
     data['tech_skills'] = supabase.table("tech_skills").select("*").eq(q_code, onet_code).execute().data
     
-    # Справочник IWA (берем весь, он небольшой, или можно фильтровать через связи)
     data['iwa'] = supabase.table("iwa_refs").select("*").execute().data
     
     return data
@@ -174,3 +151,4 @@ Reply with ONLY the number (1-{len(candidates)}), nothing else."""
         return candidates[idx]
     except:
         return candidates[0]
+

@@ -8,7 +8,6 @@ def generate_embedding(text: str):
     return client.embeddings.create(input=[text.replace("\n", " ")], model=EMBEDDING_MODEL).data[0].embedding
 
 def extract_target_job(cv_text: str):
-    """ИИ определяет целевую или текущую профессию из текста CV"""
     prompt = f"Based on this CV text, identify the most likely target job title (just the title, 2-4 words): \n\n{cv_text[:2000]}"
     response = client.chat.completions.create(
         model=LLM_MODEL,
@@ -26,7 +25,6 @@ def stream_llm_response(prompt: str):
     )
 
 def enrich_job_description(cv_text: str, job_title: str) -> str:
-    """LLM генерирует развёрнутое описание профессии на основе CV"""
     prompt = f"""Based on this CV, the person works as: {job_title}
 
 Describe this specific role in 3-5 sentences covering:
@@ -48,7 +46,6 @@ Return ONLY the description, no preamble."""
     return response.choices[0].message.content.strip()
 
 def extract_cv_facts(cv_text: str, years_experience: int = 0) -> dict:
-    """LLM читает CV и возвращает только факты — без оценок"""
     prompt = f"""Read this CV and extract facts. Return ONLY valid JSON, no preamble. Note: hard_skills include anything under "Technical Skills", "Skills", "Tools", "Technologies", "Methods", "Languages" sections.
 
 CV:
@@ -84,7 +81,6 @@ Return this exact JSON structure:
     return json.loads(text)
 
 def build_onet_to_terms(onet_skills: set, job_title: str) -> dict:
-    """Динамически генерирует маппинг для конкретной профессии"""
     prompt = f"""For the job "{job_title}", map each abstract O*NET skill category to specific real-world tools/terms a candidate would write in their CV.
 
 O*NET categories: {list(onet_skills)}

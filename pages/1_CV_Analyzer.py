@@ -10,7 +10,7 @@ from utils.ai import (generate_embedding, extract_target_job,
                        extract_cv_facts, build_onet_to_terms)
 from utils.scoring import (score_summary, score_experience, score_hard_skills,
                             score_soft_skills, score_additional, compute_overall,
-                            aggregate_by_element)
+                            aggregate_by_element, keyword_matches)
 
 st.set_page_config(page_title="Professional CV Analysis", layout="wide")
 st.title("CV Content & Structure Audit")
@@ -21,9 +21,8 @@ if not st.session_state.get("cv_text"):
         st.switch_page("app.py")
     st.stop()
 
-if "analysis_raw" not in st.session_state:
+if "analysis_done" not in st.session_state:
 
-        # 1. Определяем профессию
         job_title = extract_target_job(st.session_state.cv_text)
         enriched_description = enrich_job_description(st.session_state.cv_text, job_title)
         enriched_embedding = generate_embedding(f"{job_title}. {enriched_description}")
@@ -34,40 +33,31 @@ if "analysis_raw" not in st.session_state:
         best_match = rerank_occupations(st.session_state.cv_text, job_title, job_candidates)
         onet_code = best_match['O*NET-SOC Code']
         st.session_state['detected_job'] = best_match['Title']
-
-        # 2. Собираем O*NET данные
+        
         metric_tables = ["skills", "knowledge", "abilities", "work_styles", "work_activities"]
         metrics_context = {}
         for table in metric_tables:
             metrics_context[table] = get_normalized_metrics(table, onet_code)
-
+        
         benchmarks = get_job_benchmarks(onet_code)
         other_data = get_everything_else(onet_code)
         ats_keywords = search_ats_keywords(generate_embedding(st.session_state.cv_text))
-        ats_list = [k['keyword'] for k in ats_keywords]
+        ats_list = [k['keyword'] for k in ats_keywords]          
+        ats_keywords_with_scores = ats_keywords  
 
-        # 3. Извлекаем факты из CV через LLM
         cv_facts = extract_cv_facts(st.session_state.cv_text)
-        st.write(cv_facts)
-        # 4. Строим динамический маппинг O*NET → термины для этой профессии
-        top_onet_skills = aggregate_by_element(metrics_context.get("skills", []), min_score=60)
-        top_onet_skills |= aggregate_by_element(metrics_context.get("knowledge", []), min_score=60)
+        top_onet_skills = aggregate_by_element(metrics_context.get("skills", []), min_score=55)
+        top_onet_skills |= aggregate_by_element(metrics_context.get("knowledge", []), min_score=55)
+        top_onet_skills |= aggregate_by_element(metrics_context.get("abilities", []), min_score=55)
         onet_to_terms = build_onet_to_terms(top_onet_skills, st.session_state['detected_job'])
-        st.write("onet_to_terms:", onet_to_terms)
-        st.write("top_onet_skills:", top_onet_skills)
-        st.write("metrics skills count:", len(metrics_context.get("skills", [])))
-        st.write("sample:", metrics_context.get("skills", [])[:2])
-        st.write("soft_skills:", cv_facts.get("soft_skills_list"))
-        st.write("ats_list sample:", ats_list[:5])
-        # 5. Считаем scores в Python
         s_summary    = score_summary(cv_facts)
         s_experience = score_experience(cv_facts, benchmarks)
         s_hard       = score_hard_skills(cv_facts, metrics_context, ats_list,
                                           cv_text=st.session_state.cv_text,
-                                          onet_to_terms=onet_to_terms)
+                                          onet_to_terms=onet_to_terms, ats_keywords_with_scores=ats_keywords_with_scores)
         s_soft       = score_soft_skills(cv_facts, metrics_context)
         s_additional = score_additional(cv_facts)
-
+        st.write("s_hard result:", s_hard)
         scores = {
             "summary":     s_summary["score"],
             "experience":  s_experience["score"],
@@ -76,7 +66,6 @@ if "analysis_raw" not in st.session_state:
             "additional":  s_additional["score"],
         }
         overall = compute_overall(scores)
-
         st.session_state["cv_scores"] = scores
         st.session_state["cv_score_details"] = {
             "summary":     s_summary["details"],
@@ -87,8 +76,6 @@ if "analysis_raw" not in st.session_state:
 }
         st.session_state["overall_score"] = overall
         st.session_state["cv_facts"] = cv_facts
-
-        # 6. LLM пишет только текстовый анализ
         prompt = f"""
 You are an HR Auditor. Write qualitative feedback based on this pre-computed analysis.
 DO NOT invent scores — scores are already calculated by the system.
@@ -105,10 +92,9 @@ PRE-COMPUTED SECTION SCORES:
 - Soft Skills: {scores['soft_skills']}% | Details: {s_soft['details']}
 - Additional: {scores['additional']}% | Details: {s_additional['details']}
 
-O*NET CONTEXT:
+ROLE CONTEXT:
 - CORE TASKS: {other_data['tasks'][:1000]}
-- MISSING ATS KEYWORDS: {[k for k in ats_list if k.lower() not in st.session_state.cv_text.lower()][:15]}
-
+- MISSING ATS KEYWORDS: {[k for k in ats_list if not keyword_matches(k.lower(), st.session_state.cv_text.lower())][:15]}
 Write in Markdown:
 1. For each section: what's good, what's missing, specific rewrite suggestions
 2. List missing ATS keywords
@@ -121,8 +107,8 @@ Write in Markdown:
                 full_response += chunk.choices[0].delta.content
 
         st.session_state["analysis_raw"] = full_response
+        st.session_state["analysis_done"] = True
 
-# --- ОТОБРАЖЕНИЕ ---
 if "cv_scores" in st.session_state:
     scores  = st.session_state["cv_scores"]
     overall = st.session_state["overall_score"]
@@ -154,7 +140,7 @@ if "cv_scores" in st.session_state:
         })
         st.bar_chart(chart_data, x='Section', y='Score (%)', color="#29b5e8")
 
-    with st.expander("📊 Score Breakdown"):
+    with st.expander("Score Breakdown"):
         for section, detail_list in details.items():
             section_score = scores.get(section, "—")
             score_label = f"{section_score}%" if isinstance(section_score, int) else section_score
@@ -164,7 +150,3 @@ if "cv_scores" in st.session_state:
 
     st.divider()
     st.markdown(st.session_state["analysis_raw"])
-
-    st.divider()
-    if st.button("Prepare for Interview"):
-        st.switch_page("pages/2_Interview_Preparation.py")
