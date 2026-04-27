@@ -3,3 +3,4 @@ supabase
 openai
 python-dotenv
 pymupdf
+postgrest
